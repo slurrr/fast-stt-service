@@ -1,0 +1,14 @@
+[project]
+name = "fast-stt-service"
+version = "0.1.0"
+description = "OpenAI-compatible STT service powered by faster-whisper"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn>=0.30.0",
+  "python-multipart>=0.0.9",
+  "faster-whisper>=1.1.0",
+]
+
+[tool.uv]
+package = false
