@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import contextlib
 import io
+import math
 import os
+import struct
 import tempfile
 import time
+import wave
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -17,6 +21,7 @@ DEFAULT_LANGUAGE = os.getenv("STT_LANGUAGE", "")
 DEFAULT_BEAM_SIZE = int(os.getenv("STT_BEAM_SIZE", "1"))
 DEFAULT_BATCH_SIZE = int(os.getenv("STT_BATCH_SIZE", "1"))
 DEFAULT_VAD_FILTER = os.getenv("STT_VAD_FILTER", "1").strip().lower() not in {"0", "false", "no", "off"}
+DEFAULT_WARMUP = os.getenv("STT_WARMUP", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _dtype_to_compute_type(dtype: str) -> str:
@@ -81,6 +86,43 @@ def _segments_to_srt(segments: list[dict[str, Any]]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _warmup_audio_path() -> str:
+    duration_s = 0.75
+    sample_rate = 16000
+    frames = int(sample_rate * duration_s)
+    with tempfile.NamedTemporaryFile(prefix="stt-warmup-", suffix=".wav", delete=False) as tmp:
+        path = tmp.name
+
+    try:
+        with wave.open(path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            buf = bytearray()
+            for i in range(frames):
+                sample = int(5000 * math.sin(2.0 * math.pi * 440.0 * (i / sample_rate)))
+                buf.extend(struct.pack("<h", sample))
+                if len(buf) >= 4096:
+                    wf.writeframesraw(buf)
+                    buf.clear()
+            if buf:
+                wf.writeframesraw(buf)
+        return path
+    except Exception:
+        with contextlib.suppress(Exception):
+            os.unlink(path)
+        raise
+
+
+def _warmup_model() -> None:
+    if not DEFAULT_WARMUP:
+        return
+
+    _load_model()
+    if DEFAULT_BATCH_SIZE > 1:
+        _load_batched_model()
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
@@ -106,6 +148,11 @@ def list_models() -> dict[str, Any]:
             {"id": DEFAULT_MODEL, "object": "model", "owned_by": "local"},
         ],
     }
+
+
+@app.on_event("startup")
+def startup() -> None:
+    _warmup_model()
 
 
 @app.post("/v1/audio/transcriptions")
