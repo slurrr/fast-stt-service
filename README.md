@@ -20,10 +20,17 @@ it does not send model or language settings.
 Settings are configured locally with environment variables or the
 `fast-stt-serve` provider wrapper:
 
-- `STT_MODEL` (default `small`)
-- `STT_LANGUAGE` (default automatic detection)
+- `STT_MODEL` (default `small.en`, English-only)
+- `STT_LANGUAGE` (default `en`)
 - `STT_DEVICE` (`cpu` by default, or `cuda`)
-- `STT_DTYPE`, `STT_BEAM_SIZE`, `STT_BATCH_SIZE`, and `STT_VAD_FILTER`
+- `STT_DTYPE`, `STT_CPU_THREADS` (default `8` on CPU), `STT_BEAM_SIZE`, `STT_BATCH_SIZE`, and `STT_VAD_FILTER`
+
+The default is the balanced CPU profile: `small.en` with int8 weights, beam 1,
+and eight CPU threads. It avoids the language-detection failure mode of the
+multilingual `small` checkpoint while retaining its low latency. Use
+`STT_MODEL=small STT_LANGUAGE=` when multilingual auto-detection is required;
+use `large-v3-turbo` when maximum accuracy is worth substantially higher CPU
+latency and memory use.
 
 Run directly with `uv run --project . uvicorn service:app --host 127.0.0.1 --port 8891`,
 or use `fast-stt-serve --bg`. The stack manifest invokes the

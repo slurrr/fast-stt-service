@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import io
 import math
 import os
 import struct
@@ -14,12 +13,13 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from faster_whisper import BatchedInferencePipeline, WhisperModel
 
-DEFAULT_MODEL = os.getenv("STT_MODEL", "small")
+DEFAULT_MODEL = os.getenv("STT_MODEL", "small.en")
 DEFAULT_DEVICE = os.getenv("STT_DEVICE", "cpu")  # cpu | cuda
 DEFAULT_DTYPE = os.getenv("STT_DTYPE", os.getenv("STT_COMPUTE_TYPE", "int8" if DEFAULT_DEVICE == "cpu" else "fp16"))
-DEFAULT_LANGUAGE = os.getenv("STT_LANGUAGE", "")
+DEFAULT_LANGUAGE = os.getenv("STT_LANGUAGE", "en")
 DEFAULT_BEAM_SIZE = int(os.getenv("STT_BEAM_SIZE", "1"))
 DEFAULT_BATCH_SIZE = int(os.getenv("STT_BATCH_SIZE", "1"))
+DEFAULT_CPU_THREADS = int(os.getenv("STT_CPU_THREADS", "8" if DEFAULT_DEVICE == "cpu" else "0"))
 DEFAULT_VAD_FILTER = os.getenv("STT_VAD_FILTER", "1").strip().lower() not in {"0", "false", "no", "off"}
 DEFAULT_WARMUP = os.getenv("STT_WARMUP", "1").strip().lower() not in {"0", "false", "no", "off"}
 
@@ -56,7 +56,12 @@ _model_loaded_at: float | None = None
 def _load_model() -> WhisperModel:
     global _model, _model_loaded_at
     if _model is None:
-        _model = WhisperModel(DEFAULT_MODEL, device=DEFAULT_DEVICE, compute_type=DEFAULT_COMPUTE_TYPE)
+        _model = WhisperModel(
+            DEFAULT_MODEL,
+            device=DEFAULT_DEVICE,
+            compute_type=DEFAULT_COMPUTE_TYPE,
+            cpu_threads=DEFAULT_CPU_THREADS,
+        )
         _model_loaded_at = time.time()
     return _model
 
@@ -69,7 +74,7 @@ def _load_batched_model() -> BatchedInferencePipeline:
 
 
 def _to_srt(seconds: float) -> str:
-    ms = max(0, int(round(seconds * 1000)))
+    ms = max(0, round(seconds * 1000))
     h, rem = divmod(ms, 3600_000)
     m, rem = divmod(rem, 60_000)
     s, ms = divmod(rem, 1000)
@@ -131,6 +136,7 @@ def health() -> dict[str, Any]:
         "device": DEFAULT_DEVICE,
         "dtype": DEFAULT_DTYPE,
         "compute_type": DEFAULT_COMPUTE_TYPE,
+        "cpu_threads": DEFAULT_CPU_THREADS,
         "language": DEFAULT_LANGUAGE or "auto",
         "beam_size": DEFAULT_BEAM_SIZE,
         "batch_size": DEFAULT_BATCH_SIZE,
@@ -157,7 +163,7 @@ def startup() -> None:
 
 @app.post("/v1/audio/transcriptions")
 async def transcriptions(
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     model: str = Form("whisper-1"),
     language: str | None = Form(None),
     prompt: str | None = Form(None),
@@ -178,12 +184,12 @@ async def transcriptions(
         tmp.write(raw)
         tmp.flush()
 
-        transcribe_kwargs = dict(
-            language=(language or DEFAULT_LANGUAGE or None),
-            beam_size=DEFAULT_BEAM_SIZE,
-            vad_filter=DEFAULT_VAD_FILTER,
-            initial_prompt=(prompt or None),
-        )
+        transcribe_kwargs: dict[str, Any] = {
+            "language": (language or DEFAULT_LANGUAGE or None),
+            "beam_size": DEFAULT_BEAM_SIZE,
+            "vad_filter": DEFAULT_VAD_FILTER,
+            "initial_prompt": (prompt or None),
+        }
         if temperature is not None:
             transcribe_kwargs["temperature"] = float(temperature)
         if DEFAULT_BATCH_SIZE > 1:
