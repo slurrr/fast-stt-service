@@ -105,7 +105,7 @@ higher accuracy at substantially greater CPU time and memory use, try
 Start the service as shown above, then run this from a fresh clone:
 
 ```bash
-python - <<'PY'
+python3 - <<'PY'
 import math, struct, wave
 
 with wave.open("/tmp/stt-check.wav", "wb") as f:
